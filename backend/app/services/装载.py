@@ -1,7 +1,7 @@
 import json
 from app.db import 连接
 from app.seed import 此刻
-from app.services import 时间, 热度窗
+from app.services import 时间, 热度窗, 水位闸
 
 
 def 装一批(体: dict) -> dict:
@@ -17,6 +17,7 @@ def 装一批(体: dict) -> dict:
     事件列表 = 体.get("事件") or []
     conn = 连接()
     try:
+        conn.execute("BEGIN IMMEDIATE")
         报告 = {
             "批次编号": 批次编号,
             "入流": 0,
@@ -44,10 +45,7 @@ def 装一批(体: dict) -> dict:
 
             水位 = conn.execute("SELECT * FROM 水位线 WHERE 房间键=?", (房间键,)).fetchone()
             if not 水位:
-                conn.execute(
-                    "INSERT INTO 水位线(房间键, 事件时水位, 允许迟到秒, 更新处理时) VALUES (?,?,?,?)",
-                    (房间键, 房["开播事件时"], 默许迟到, 此刻()),
-                )
+                水位闸.守卫写水位(conn, 房间键, 房["开播事件时"], 此刻(), 默许迟到)
                 水位 = conn.execute("SELECT * FROM 水位线 WHERE 房间键=?", (房间键,)).fetchone()
 
             允许迟到 = int(水位["允许迟到秒"])
@@ -64,11 +62,8 @@ def 装一批(体: dict) -> dict:
 
             当前水位 = 水位["事件时水位"]
             if 时间.解析(事件时) > 时间.解析(当前水位):
-                当前水位 = 事件时
-                conn.execute(
-                    "UPDATE 水位线 SET 事件时水位=?, 更新处理时=? WHERE 房间键=?",
-                    (当前水位, 处理时, 房间键),
-                )
+                # 水位与关窗同事务：守卫写闸拒绝变小，推进后立刻关窗，杜绝半截
+                当前水位 = 水位闸.守卫写水位(conn, 房间键, 事件时, 处理时)
                 报告["新关窗"] += 热度窗.尝试关窗(
                     conn, 房间键, 当前水位, 允许迟到, 窗长, 处理时
                 )
@@ -180,5 +175,8 @@ def 装一批(体: dict) -> dict:
         )
         conn.commit()
         return 报告
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()

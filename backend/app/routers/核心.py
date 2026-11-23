@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import 夹具目录, 连接
-from app.services import 装载, 贯验, 目录
+from app.services import 装载, 贯验, 目录, 水位闸
 
 路由 = APIRouter(prefix="/api")
 
@@ -11,6 +11,12 @@ from app.services import 装载, 贯验, 目录
 class 装载请求(BaseModel):
     批次编号: str = ""
     事件: list = Field(default_factory=list)
+
+
+class 水位变小请求(BaseModel):
+    房间键: str
+    新值: str
+    处理时: str = ""
 
 
 @路由.get("/健康")
@@ -134,6 +140,18 @@ def 装夹具(名: str = "准时热度样例"):
     if not 路径.exists():
         raise HTTPException(404, f"夹具不存在:{名}")
     return 装载.装一批(json.loads(路径.read_text(encoding="utf-8")))
+
+
+@路由.get("/水位变小/审查")
+def 审查水位变小(房间键: str, 新值: str):
+    """只读裁决：房间、旧值、新值、拒绝/重开列表、valid。不写库。"""
+    return 水位闸.审查(房间键, 新值)
+
+
+@路由.post("/水位变小")
+def 提交水位变小(体: 水位变小请求):
+    """水位写闸。甲口径：新值 < 旧值整票拒绝，水位不变、已关窗保持关闭。"""
+    return 水位闸.提交(体.房间键, 体.新值, 体.处理时 or None)
 
 
 @路由.post("/贯验")

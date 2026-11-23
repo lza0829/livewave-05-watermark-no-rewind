@@ -1,5 +1,6 @@
 from app.db import 连接
 from app.seed import 此刻
+from app.services import 水位闸
 
 
 def 跑贯验() -> dict:
@@ -31,6 +32,9 @@ def 跑贯验() -> dict:
             ).fetchone()
             if 末撤 and (末撤["新点赞"] != 窗["点赞合计"] or 末撤["新送礼"] != 窗["送礼合计"]):
                 问题.append(f"窗{窗['窗键']}末次撤回与窗表不一致")
+
+        # 甲口径：水位不得回退，已关窗不得高于水位，水位已过窗止的窗不得仍开启
+        问题.extend(水位闸.不变式(conn))
 
         # 旁路事件不得挂窗键
         脏旁路 = conn.execute(
